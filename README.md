@@ -7,7 +7,7 @@
 | `ghcr.io/jiangood/frps` | 服务端 |
 | `ghcr.io/jiangood/frpc` | 客户端 |
 
-标签即 frp 版本号（`X.Y.Z` 与 `vX.Y.Z`），另有 `latest`（只在构建上游最新版本时才打）；已构建的版本见 [versions.txt](versions.txt)。平台：`linux/amd64`。
+标签即 frp 版本号（`X.Y.Z` 与 `vX.Y.Z`），另有 `latest`（只在构建上游最新版本时才打）。平台：`linux/amd64`。
 
 ## 使用
 
@@ -79,7 +79,9 @@ docker compose pull && docker compose up -d                  # 更新到最新�
 | 每周一 03:00 UTC（北京时间 11:00） | 上游有新版本时才构建 |
 | 手动触发 | 可指定版本、平台、是否强制重建 |
 
-版本解析顺序：手动输入 → 本次推送的 tag → frp 官方最新 release。每周的定时任务会先查 GHCR 里是否已存在该版本，已存在就直接跳过。构建前会校验镜像内版本号、内置配置 `verify` 以及 frps 默认配置启动是否成功，全部通过才会推送。推送成功后，工作流会把该版本号写入 [versions.txt](versions.txt) 并提交回默认分支。
+版本解析顺序：手动输入 → 本次推送的 tag → frp 官方最新 release。每周的定时任务会先查 GHCR 里是否已存在该版本，已存在就直接跳过。构建前会校验镜像内版本号、内置配置 `verify` 以及 frps 默认配置启动是否成功，全部通过才会推送。
+
+> 已发布的版本和标签可以在仓库首页右侧的 **Packages** 里查看，或者直接访问 <https://github.com/jiangood/docker-frp/pkgs/container/frps>（frpc 同理）。
 
 > GitHub 会在仓库连续 60 天没有提交活动后暂停定时工作流，届时在 Actions 页面重新启用即可。
 
