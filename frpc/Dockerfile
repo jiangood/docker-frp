@@ -4,12 +4,8 @@
 # The official release archive is downloaded with ADD and unpacked, so the
 # binary is the same one upstream publishes.
 #
-# Supported platforms (frp linux release artifacts):
-#   amd64 -> frp_<ver>_linux_amd64.tar.gz
-#   arm64 -> frp_<ver>_linux_arm64.tar.gz
-#   arm   -> frp_<ver>_linux_arm.tar.gz    (GOARM=5, runs on armv5/v6/v7)
-# Only linux/amd64 is built by default; for armv7 the dedicated hard-float
-# build frp_<ver>_linux_arm_hf.tar.gz is faster, set TARGETARCH accordingly.
+# Platform matrix (which TARGETARCH maps to which upstream archive, and which
+# platforms are built by default) is documented in the README.
 FROM alpine:3.24
 
 ARG FRP_VERSION=0.71.0

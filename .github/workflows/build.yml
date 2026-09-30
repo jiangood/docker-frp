@@ -1,16 +1,5 @@
 name: Build and push images
 
-# Builds ghcr.io/<owner>/frps and ghcr.io/<owner>/frpc from the official frp
-# release archives. The image tags always match the upstream frp version
-# (0.71.0, v0.71.0 and latest).
-#
-# Triggers
-#   push to main / vX.Y.Z tag : build and push
-#   pull request              : build and test only (nothing is pushed)
-#   schedule (weekly)         : build and push, but only when frp released a
-#                               version that is not in GHCR yet
-#   manual                    : build a specific version on demand
-
 on:
   push:
     branches: [main]
@@ -105,17 +94,6 @@ jobs:
               build=false
             fi
           fi
-
-          {
-            echo "### frp container images"
-            echo ""
-            echo "| item | value |"
-            echo "| --- | --- |"
-            echo "| frp version | \`${version}\` |"
-            echo "| upstream latest | \`${upstream}\` |"
-            echo "| \`latest\` tag | ${is_latest} |"
-            echo "| build | ${build} |"
-          } >> "$GITHUB_STEP_SUMMARY"
 
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "is_latest=${is_latest}" >> "$GITHUB_OUTPUT"
@@ -213,22 +191,8 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          provenance: true
-          sbom: true
           build-args: |
             FRP_VERSION=${{ needs.check.outputs.version }}
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,scope=${{ matrix.component }},mode=max
-
-      - name: Verify the published manifests
-        if: github.event_name != 'pull_request'
-        env:
-          TAGS: ${{ steps.meta.outputs.tags }}
-        run: |
-          set -eu
-          while IFS= read -r tag; do
-            [ -n "${tag}" ] || continue
-            echo "== ${tag}"
-            docker buildx imagetools inspect "${tag}" > /dev/null
-          done <<< "${TAGS}"
 
