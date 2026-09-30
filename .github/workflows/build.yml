@@ -81,18 +81,23 @@ jobs:
           fi
 
           # The weekly run is a no-op unless this frp version is still missing
-          # from the container registry.
+          # from the container registry. A registry hiccup must not fail the
+          # run, it only means we try to build.
           build=true
           if [ "${GITHUB_EVENT_NAME}" = "schedule" ] && [ "${FORCE:-false}" != "true" ]; then
             owner="${GITHUB_REPOSITORY_OWNER,,}"
-            token="$(curl -fsSL -u "${owner}:${GH_TOKEN}" \
-              "https://ghcr.io/token?scope=repository:${owner}/frps:pull&service=ghcr.io" | jq -r '.token')"
-            code="$(curl -s -o /dev/null -w '%{http_code}' \
-              -H "Authorization: Bearer ${token}" \
-              -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json' \
-              "https://ghcr.io/v2/${owner}/frps/manifests/${version}")"
-            echo "ghcr.io/${owner}/frps:${version} -> HTTP ${code}"
-            if [ "$code" = "200" ]; then
+            code=""
+            if token="$(curl -fsSL -u "${owner}:${GH_TOKEN}" \
+                    "https://ghcr.io/token?scope=repository:${owner}/frps:pull&service=ghcr.io" \
+                    2> /dev/null | jq -r '.token // empty')" \
+                && [ -n "${token}" ]; then
+              code="$(curl -s -o /dev/null -w '%{http_code}' \
+                -H "Authorization: Bearer ${token}" \
+                -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json' \
+                "https://ghcr.io/v2/${owner}/frps/manifests/${version}")" || code=""
+            fi
+            echo "ghcr.io/${owner}/frps:${version} -> HTTP ${code:-unknown}"
+            if [ "${code}" = "200" ]; then
               build=false
             fi
           fi
