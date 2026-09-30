@@ -119,8 +119,8 @@ docker compose pull && docker compose up -d
 每次构建都会执行以下校验，全部通过才会推送：
 
 1. 镜像内 `frps --version` / `frpc --version` 输出与目标版本一致；
-2. 内置配置文件存在且 `verify` 通过；
-3. 真实联调：起一个 frps 和一个 frpc，用 frpc 把 frps 的 dashboard 端口（7500）转发到 16000，再从另一个容器穿过隧道抓取 `/api/serverinfo`，确认整条链路可用。
+2. 内置配置文件存在且 `verify` 校验通过；
+3. 不带任何参数启动 frps 时，日志出现 `frps started successfully`。
 
 > 注意：GitHub 会在仓库连续 60 天没有任何提交活动后暂停定时工作流，届时在 Actions 页面重新启用即可。
 

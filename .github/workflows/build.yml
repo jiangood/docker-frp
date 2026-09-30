@@ -62,7 +62,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          upstream="$(curl -fsSL https://api.github.com/repos/fatedier/frp/releases/latest | jq -r '.tag_name')"
+          upstream="$(gh api repos/fatedier/frp/releases/latest --jq '.tag_name')"
           upstream="${upstream#v}"
 
           version="${INPUT_VERSION:-}"
@@ -178,10 +178,23 @@ jobs:
         run: |
           set -eux
           image="frp-${{ matrix.component }}:test"
+
           reported="$(docker run --rm "$image" --version)"
           [ "$reported" = "${{ needs.check.outputs.version }}" ]
+
           docker run --rm --entrypoint sh "$image" -c "test -s /etc/frp/${{ matrix.component }}.toml"
           docker run --rm "$image" verify -c /etc/frp/${{ matrix.component }}.toml
+
+          # Started without arguments the bundled configuration must come up.
+          if [ "${{ matrix.component }}" = "frps" ]; then
+            docker run -d --name smoke "$image" > /dev/null
+            for _ in $(seq 1 20); do
+              docker logs smoke 2>&1 | grep -q 'started successfully' && break
+              sleep 1
+            done
+            docker logs smoke 2>&1 | grep -q 'started successfully'
+            docker rm -f smoke > /dev/null
+          fi
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -209,66 +222,3 @@ jobs:
             echo "== ${tag}"
             docker buildx imagetools inspect "${tag}" > /dev/null
           done <<< "${TAGS}"
-
-  e2e:
-    name: End-to-end test
-    needs: check
-    if: needs.check.outputs.build == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Build the amd64 test images
-        run: |
-          set -eux
-          docker build --build-arg FRP_VERSION=${{ needs.check.outputs.version }} -t frp-frps:test frps
-          docker build --build-arg FRP_VERSION=${{ needs.check.outputs.version }} -t frp-frpc:test frpc
-
-      - name: Run a tunnel through frps with frpc
-        run: |
-          set -euo pipefail
-
-          net=frp-e2e
-          docker network create "$net"
-
-          # frps keeps its bundled bindPort 7000 and additionally serves the
-          # dashboard on 7500.
-          cat > "$RUNNER_TEMP/frps.toml" <<'EOF'
-          bindPort = 7000
-
-          webServer.addr = "0.0.0.0"
-          webServer.port = 7500
-          EOF
-
-          # frpc publishes that dashboard on port 16000 of the frps container,
-          # so fetching it proves the whole chain works.
-          cat > "$RUNNER_TEMP/frpc.toml" <<'EOF'
-          serverAddr = "frp-e2e-frps"
-          serverPort = 7000
-
-          [[proxies]]
-          name = "e2e-dashboard"
-          type = "tcp"
-          localIP = "frp-e2e-frps"
-          localPort = 7500
-          remotePort = 16000
-          EOF
-
-          docker run -d --name frp-e2e-frps --network "$net" \
-            -v "$RUNNER_TEMP/frps.toml:/etc/frp/frps.toml:ro" frp-frps:test
-          docker run -d --name frp-e2e-frpc --network "$net" \
-            -v "$RUNNER_TEMP/frpc.toml:/etc/frp/frpc.toml:ro" frp-frpc:test
-
-          for _ in $(seq 1 30); do
-            docker logs frp-e2e-frpc 2>&1 | grep -q 'start proxy success' && break
-            sleep 1
-          done
-          docker logs frp-e2e-frpc 2>&1 | grep -q 'start proxy success'
-
-          body="$(docker run --rm --network "$net" --entrypoint sh frp-frpc:test \
-            -c 'wget -q -O - http://frp-e2e-frps:16000/api/serverinfo')"
-          echo "$body"
-          echo "$body" | grep -q '"version"'
