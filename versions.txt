@@ -1,1 +1,2 @@
 # frp versions built and pushed to ghcr.io by GitHub Actions, newest first.
+0.71.0
