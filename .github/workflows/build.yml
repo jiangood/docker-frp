@@ -14,6 +14,8 @@ name: Build and push images
 on:
   push:
     branches: [main]
+    # versions.txt is updated by the workflow itself, it must not retrigger a build.
+    paths-ignore: ['versions.txt']
     tags: ['v*.*.*']
   pull_request:
     branches: [main]
@@ -227,3 +229,45 @@ jobs:
             echo "== ${tag}"
             docker buildx imagetools inspect "${tag}" > /dev/null
           done <<< "${TAGS}"
+
+  record:
+    name: Record the built version
+    needs: [check, build]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout the default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Add the version to versions.txt
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+
+          tmp="$(mktemp)"
+          {
+            echo "# frp versions built and pushed to ghcr.io by GitHub Actions, newest first."
+            echo "${VERSION}"
+            if [ -f versions.txt ]; then
+              grep -E '^[0-9]' versions.txt | grep -vx "${VERSION}" || true
+            fi
+          } > "$tmp"
+          mv "$tmp" versions.txt
+          cat versions.txt
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add versions.txt
+          if git diff --cached --quiet; then
+            echo "versions.txt is already up to date"
+            exit 0
+          fi
+          git commit -m "Record frp ${VERSION} in versions.txt"
+          git pull --rebase --autostash origin "${BRANCH}"
+          git push origin "HEAD:${BRANCH}"
