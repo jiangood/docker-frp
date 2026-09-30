@@ -62,7 +62,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          upstream="$(gh api repos/fatedier/frp/releases/latest --jq '.tag_name')"
+          # https://github.com/<repo>/releases/latest redirects to the newest
+          # tag: no API call, no token, no rate limit.
+          upstream="$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+            https://github.com/fatedier/frp/releases/latest)"
+          upstream="${upstream##*/}"
           upstream="${upstream#v}"
 
           version="${INPUT_VERSION:-}"
