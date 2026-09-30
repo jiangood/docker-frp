@@ -152,6 +152,8 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ steps.image.outputs.name }}
+          labels: |
+            org.opencontainers.image.licenses=Apache-2.0
           tags: |
             type=raw,value=${{ needs.check.outputs.version }}
             type=raw,value=v${{ needs.check.outputs.version }}
@@ -198,12 +200,15 @@ jobs:
 
       - name: Verify the published manifests
         if: github.event_name != 'pull_request'
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           set -eu
-          for tag in ${{ steps.meta.outputs.tags }}; do
+          while IFS= read -r tag; do
+            [ -n "${tag}" ] || continue
             echo "== ${tag}"
             docker buildx imagetools inspect "${tag}" > /dev/null
-          done
+          done <<< "${TAGS}"
 
   e2e:
     name: End-to-end test
