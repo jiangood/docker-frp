@@ -1,0 +1,8 @@
+*.tar.gz
+*.zip
+*.log
+.tmp/
+
+# JetBrains IDEs
+.idea/
+*.iml

@@ -1,0 +1,26 @@
+# Default frps configuration, used when the container is started without an
+# explicit `-c`. Mount your own file over /etc/frp/frps.toml to replace it.
+#
+# Every option is documented at:
+# https://github.com/fatedier/frp/blob/dev/conf/frps_full_example.toml
+
+bindPort = 7000
+
+# Authentication token shared with frpc (optional, but strongly recommended).
+# auth.method = "token"
+# auth.token = "change-me"
+
+# Dashboard / admin API, reachable at http://<host>:7500
+# webServer.addr = "0.0.0.0"
+# webServer.port = 7500
+# webServer.user = "admin"
+# webServer.password = "admin"
+
+# Logging
+# log.to = "console"
+# log.level = "info"
+# log.maxDays = 3
+
+# Expose ports 80/443 for HTTP/HTTPS vhost forwarding.
+# vhostHTTPPort = 80
+# vhostHTTPSPort = 443

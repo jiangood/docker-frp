@@ -1,0 +1,269 @@
+name: Build and push images
+
+# Builds ghcr.io/<owner>/frps and ghcr.io/<owner>/frpc from the official frp
+# release archives. The image tags always match the upstream frp version
+# (0.71.0, v0.71.0 and latest).
+#
+# Triggers
+#   push to main / vX.Y.Z tag : build and push
+#   pull request              : build and test only (nothing is pushed)
+#   schedule (weekly)         : build and push, but only when frp released a
+#                               version that is not in GHCR yet
+#   manual                    : build a specific version on demand
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  pull_request:
+    branches: [main]
+  schedule:
+    # Every Monday 03:00 UTC (= 11:00 Asia/Shanghai).
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: frp version, e.g. 0.71.0 (empty = newest upstream release)
+        required: false
+        type: string
+        default: ''
+      platforms:
+        description: target platforms
+        required: false
+        type: string
+        default: linux/amd64
+      force:
+        description: Build even when the images already exist
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Resolve frp version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      is_latest: ${{ steps.check.outputs.is_latest }}
+      build: ${{ steps.check.outputs.build }}
+    steps:
+      - name: Resolve version and decide whether to build
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_VERSION: ${{ inputs.version }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+
+          upstream="$(curl -fsSL https://api.github.com/repos/fatedier/frp/releases/latest | jq -r '.tag_name')"
+          upstream="${upstream#v}"
+
+          version="${INPUT_VERSION:-}"
+          version="${version#v}"
+          if [ -z "$version" ]; then
+            if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+              version="${GITHUB_REF_NAME#v}"
+            else
+              version="$upstream"
+            fi
+          fi
+
+          is_latest=false
+          if [ "$version" = "$upstream" ]; then
+            is_latest=true
+          fi
+
+          # The weekly run is a no-op unless this frp version is still missing
+          # from the container registry.
+          build=true
+          if [ "${GITHUB_EVENT_NAME}" = "schedule" ] && [ "${FORCE:-false}" != "true" ]; then
+            owner="${GITHUB_REPOSITORY_OWNER,,}"
+            token="$(curl -fsSL -u "${owner}:${GH_TOKEN}" \
+              "https://ghcr.io/token?scope=repository:${owner}/frps:pull&service=ghcr.io" | jq -r '.token')"
+            code="$(curl -s -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer ${token}" \
+              -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json' \
+              "https://ghcr.io/v2/${owner}/frps/manifests/${version}")"
+            echo "ghcr.io/${owner}/frps:${version} -> HTTP ${code}"
+            if [ "$code" = "200" ]; then
+              build=false
+            fi
+          fi
+
+          {
+            echo "### frp container images"
+            echo ""
+            echo "| item | value |"
+            echo "| --- | --- |"
+            echo "| frp version | \`${version}\` |"
+            echo "| upstream latest | \`${upstream}\` |"
+            echo "| \`latest\` tag | ${is_latest} |"
+            echo "| build | ${build} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "is_latest=${is_latest}" >> "$GITHUB_OUTPUT"
+          echo "build=${build}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: ${{ matrix.component }} ${{ needs.check.outputs.version }}
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: frps
+            context: frps
+          - component: frpc
+            context: frpc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ matrix.component }}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=raw,value=${{ needs.check.outputs.version }}
+            type=raw,value=v${{ needs.check.outputs.version }}
+            type=raw,value=latest,enable=${{ needs.check.outputs.is_latest }}
+            type=ref,event=pr,prefix=pr-
+
+      - name: Build for testing (linux/amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: frp-${{ matrix.component }}:test
+          provenance: false
+          build-args: |
+            FRP_VERSION=${{ needs.check.outputs.version }}
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,scope=${{ matrix.component }},mode=max
+
+      - name: Test the image
+        run: |
+          set -eux
+          image="frp-${{ matrix.component }}:test"
+          reported="$(docker run --rm "$image" --version)"
+          [ "$reported" = "${{ needs.check.outputs.version }}" ]
+          docker run --rm --entrypoint sh "$image" -c "test -s /etc/frp/${{ matrix.component }}.toml"
+          docker run --rm "$image" verify -c /etc/frp/${{ matrix.component }}.toml
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          platforms: ${{ inputs.platforms || 'linux/amd64' }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          sbom: true
+          build-args: |
+            FRP_VERSION=${{ needs.check.outputs.version }}
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,scope=${{ matrix.component }},mode=max
+
+      - name: Verify the published manifests
+        if: github.event_name != 'pull_request'
+        run: |
+          set -eu
+          for tag in ${{ steps.meta.outputs.tags }}; do
+            echo "== ${tag}"
+            docker buildx imagetools inspect "${tag}" > /dev/null
+          done
+
+  e2e:
+    name: End-to-end test
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build the amd64 test images
+        run: |
+          set -eux
+          docker build --build-arg FRP_VERSION=${{ needs.check.outputs.version }} -t frp-frps:test frps
+          docker build --build-arg FRP_VERSION=${{ needs.check.outputs.version }} -t frp-frpc:test frpc
+
+      - name: Run a tunnel through frps with frpc
+        run: |
+          set -euo pipefail
+
+          net=frp-e2e
+          docker network create "$net"
+
+          # frps keeps its bundled bindPort 7000 and additionally serves the
+          # dashboard on 7500.
+          cat > "$RUNNER_TEMP/frps.toml" <<'EOF'
+          bindPort = 7000
+
+          webServer.addr = "0.0.0.0"
+          webServer.port = 7500
+          EOF
+
+          # frpc publishes that dashboard on port 16000 of the frps container,
+          # so fetching it proves the whole chain works.
+          cat > "$RUNNER_TEMP/frpc.toml" <<'EOF'
+          serverAddr = "frp-e2e-frps"
+          serverPort = 7000
+
+          [[proxies]]
+          name = "e2e-dashboard"
+          type = "tcp"
+          localIP = "frp-e2e-frps"
+          localPort = 7500
+          remotePort = 16000
+          EOF
+
+          docker run -d --name frp-e2e-frps --network "$net" \
+            -v "$RUNNER_TEMP/frps.toml:/etc/frp/frps.toml:ro" frp-frps:test
+          docker run -d --name frp-e2e-frpc --network "$net" \
+            -v "$RUNNER_TEMP/frpc.toml:/etc/frp/frpc.toml:ro" frp-frpc:test
+
+          for _ in $(seq 1 30); do
+            docker logs frp-e2e-frpc 2>&1 | grep -q 'start proxy success' && break
+            sleep 1
+          done
+          docker logs frp-e2e-frpc 2>&1 | grep -q 'start proxy success'
+
+          body="$(docker run --rm --network "$net" --entrypoint sh frp-frpc:test \
+            -c 'wget -q -O - http://frp-e2e-frps:16000/api/serverinfo')"
+          echo "$body"
+          echo "$body" | grep -q '"version"'

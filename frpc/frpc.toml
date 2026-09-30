@@ -1,0 +1,29 @@
+# Default frpc configuration, used when the container is started without an
+# explicit `-c`. Mount your own file over /etc/frp/frpc.toml to replace it.
+#
+# Every option is documented at:
+# https://github.com/fatedier/frp/blob/dev/conf/frpc_full_example.toml
+
+serverAddr = "127.0.0.1"
+serverPort = 7000
+
+# auth.token = "change-me"
+
+# log.to = "console"
+# log.level = "info"
+
+# Example TCP proxy: expose 127.0.0.1:22 behind frps on remote port 6000.
+# [[proxies]]
+# name = "ssh"
+# type = "tcp"
+# localIP = "127.0.0.1"
+# localPort = 22
+# remotePort = 6000
+
+# Example HTTP proxy served through the frps vhostHTTPPort (default 80).
+# [[proxies]]
+# name = "web"
+# type = "http"
+# localIP = "127.0.0.1"
+# localPort = 8080
+# customDomains = ["www.example.com"]
